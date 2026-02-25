@@ -18,6 +18,7 @@ that simulate global economic, social, and climate dynamics from 1980 to 2100.
   - [Flows](#flows)
   - [Auxiliaries](#auxiliaries)
   - [Auxiliary Inputs and Effects](#auxiliary-inputs-and-effects)
+  - [Parameters](#parameters)
 - [Plotting](#plotting)
 - [Sector Modules](#sector-modules)
   - [Sector Constructors](#sector-constructors)
@@ -327,6 +328,29 @@ for eff in info.effects
     println("  ", eff.name, " — ", eff.description, " (", eff.sector, ")")
 end
 ```
+
+### Parameters
+
+#### `list_parameters() -> Vector{NamedTuple}`
+
+List every **parameter** across all 12 sectors of the model with its default
+value and description.
+
+Each entry has fields: `name` (namespaced, e.g. `"cli₊DACCO22100"`),
+`description`, `sector`, `value`.
+
+```julia
+for p in Earth4All.list_parameters()
+    println(p.sector, " | ", p.name, " = ", p.value, " — ", p.description)
+end
+
+# Filter to a single sector
+climate_params = filter(p -> p.sector == "Climate", Earth4All.list_parameters())
+```
+
+Note: to get a mutable `Dict{Symbol, Float64}` for use with `run_e4a_solution`,
+use the per-sector `getparameters()` functions (see
+[Parameters and Initial Conditions](#parameters-and-initial-conditions)).
 
 ---
 

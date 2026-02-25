@@ -565,3 +565,38 @@ function auxiliary_effects(name::String)
     return (name=found.name, description=found.description, sector=found.sector,
             effects=sort(unique(effects), by=x -> x.name))
 end
+
+"""
+    list_parameters()
+
+List every parameter across all 12 sectors of the Earth4All model.
+
+Returns a sorted vector of NamedTuples with fields:
+`name` (namespaced, e.g. `"cli₊DACCO22100"`), `description`, `sector`, `value` (default).
+
+# Example
+```julia
+for p in Earth4All.list_parameters()
+    println(p.sector, " | ", p.name, " = ", p.value, " — ", p.description)
+end
+```
+"""
+function list_parameters()
+    sectors = _sector_systems()
+
+    ParamInfo = NamedTuple{(:name, :description, :sector, :value),
+                           Tuple{String, String, String, Float64}}
+    result = ParamInfo[]
+
+    for (prefix, sector_name, sys) in sectors
+        for p in ModelingToolkit.get_ps(sys)
+            pname = replace(string(p), "(t)" => "")
+            desc = try ModelingToolkit.getdescription(p) catch; "" end
+            val  = try Float64(ModelingToolkit.getdefault(p)) catch; NaN end
+            push!(result, (name="$(prefix)₊$(pname)", description=desc,
+                           sector=sector_name, value=val))
+        end
+    end
+
+    return sort(result, by=x -> x.name)
+end
