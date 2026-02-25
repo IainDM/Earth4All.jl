@@ -22,5 +22,7 @@ include("Wellbeing.jl")
 include("earth4all/scenarios.jl")
 include("earth4all/solutions.jl")
 include("earth4all/plots.jl")
+include("earth4all/variables.jl")
+include("earth4all/structure.jl")
 
 end
