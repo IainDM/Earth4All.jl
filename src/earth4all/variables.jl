@@ -18,17 +18,28 @@ end
 """
 function variable_list(sol)
     sys = sol.prob.f.sys
-    vars = ModelingToolkit.get_unknowns(sys)
     result = Tuple{String,String}[]
-    for v in vars
+    seen = Set{String}()
+
+    # State variables (unknowns)
+    for v in ModelingToolkit.get_unknowns(sys)
         name = replace(string(v), "(t)" => "")
-        desc = try
-            ModelingToolkit.getdescription(v)
-        catch
-            ""
-        end
+        name in seen && continue
+        push!(seen, name)
+        desc = try ModelingToolkit.getdescription(v) catch; "" end
         push!(result, (name, desc))
     end
+
+    # Observed (algebraic) variables
+    for eq in ModelingToolkit.observed(sys)
+        v = eq.lhs
+        name = replace(string(v), "(t)" => "")
+        name in seen && continue
+        push!(seen, name)
+        desc = try ModelingToolkit.getdescription(v) catch; "" end
+        push!(result, (name, desc))
+    end
+
     return sort(result, by=first)
 end
 
@@ -59,11 +70,16 @@ ts.values  # Vector of variable values
 """
 function get_timeseries(sol, name::String)
     sys = sol.prob.f.sys
-    vars = ModelingToolkit.get_unknowns(sys)
+
+    # Collect all accessible variables: unknowns + observed
+    all_vars = collect(ModelingToolkit.get_unknowns(sys))
+    for eq in ModelingToolkit.observed(sys)
+        push!(all_vars, eq.lhs)
+    end
 
     # Build a lookup from name (without "(t)") to symbolic variable
     matches = []
-    for v in vars
+    for v in all_vars
         vname = replace(string(v), "(t)" => "")
         if vname == name
             return (t=sol.t, values=sol[v])
