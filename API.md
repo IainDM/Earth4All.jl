@@ -17,6 +17,7 @@ that simulate global economic, social, and climate dynamics from 1980 to 2100.
   - [Stocks](#stocks)
   - [Flows](#flows)
   - [Auxiliaries](#auxiliaries)
+  - [Auxiliary Inputs and Effects](#auxiliary-inputs-and-effects)
 - [Plotting](#plotting)
 - [Sector Modules](#sector-modules)
   - [Sector Constructors](#sector-constructors)
@@ -281,6 +282,49 @@ Each entry has fields: `name`, `description`, `sector`.
 ```julia
 for a in Earth4All.list_auxiliaries()
     println(a.sector, " | ", a.name, " — ", a.description)
+end
+```
+
+### Auxiliary Inputs and Effects
+
+#### `auxiliary_inputs(name::String) -> NamedTuple`
+
+Show all variables that are **direct inputs** to the given auxiliary — i.e. the
+variables that appear on the right-hand side of its defining equation.
+
+`name` may be the full namespaced name (e.g. `"wel₊AWBI"`) or the short name
+(e.g. `"AWBI"`) when unambiguous.
+
+Cross-sector dependencies are resolved automatically: if an auxiliary in the
+Wellbeing sector references `GDPP`, the result reports the variable from its
+home sector (Population) rather than the local external copy.
+
+Returns a `NamedTuple` with fields: `name`, `description`, `sector`, `equation`,
+`inputs` (vector of `(name, description, sector)` tuples).
+
+```julia
+info = Earth4All.auxiliary_inputs("AWBI")
+println("Equation: ", info.equation)
+for inp in info.inputs
+    println("  ", inp.name, " — ", inp.description, " (", inp.sector, ")")
+end
+```
+
+#### `auxiliary_effects(name::String) -> NamedTuple`
+
+Show all variables whose defining equations **directly reference** the given
+auxiliary — i.e. every variable for which this auxiliary is an input.
+
+Effects are traced across sector boundaries: if `GDPP` (defined in Population)
+appears in Wellbeing's equations, those downstream variables are included.
+
+Returns a `NamedTuple` with fields: `name`, `description`, `sector`,
+`effects` (vector of `(name, description, sector)` tuples).
+
+```julia
+info = Earth4All.auxiliary_effects("GDPP")
+for eff in info.effects
+    println("  ", eff.name, " — ", eff.description, " (", eff.sector, ")")
 end
 ```
 

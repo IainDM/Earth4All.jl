@@ -60,6 +60,105 @@ function _is_delay_buffer(name::String)
 end
 
 """
+    _extract_var_references(expr_str::String)
+
+Extract all variable names referenced in a symbolic expression string.
+Variables are identified by the pattern `NAME(t)` where `NAME` is a valid
+Julia identifier.  Parameters (which lack `(t)`) are excluded.
+"""
+function _extract_var_references(expr_str::String)
+    refs = String[]
+    for m in eachmatch(r"([A-Za-z_]\w*)\(t\)", expr_str)
+        push!(refs, m.captures[1])
+    end
+    return unique(refs)
+end
+
+"""
+    _build_dependency_info()
+
+Build full dependency information for all equations in the model.
+
+Returns `(endogenous, all_eqs)` where:
+- `endogenous` maps a short variable name to `(name, description, sector)` for its
+  home sector (the sector where it is endogenously defined).
+- `all_eqs` is a vector of `(lhs_full, lhs_short, rhs_str, rhs_vars, is_diff)` tuples
+  covering every non-delay-buffer equation across all sectors.
+"""
+function _build_dependency_info()
+    sectors = _sector_systems()
+
+    endogenous = Dict{String, NamedTuple{(:name, :description, :sector),
+                                          Tuple{String,String,String}}}()
+
+    EqInfo = NamedTuple{(:lhs_full, :lhs_short, :rhs_str, :rhs_vars, :is_diff),
+                        Tuple{String, String, String, Vector{String}, Bool}}
+    all_eqs = EqInfo[]
+
+    for (prefix, sector_name, sys) in sectors
+        eqs  = ModelingToolkit.get_eqs(sys)
+        unknowns = ModelingToolkit.get_unknowns(sys)
+        descs = _description_map(unknowns)
+
+        # Register endogenous variables (first registration wins)
+        for (vname, d) in descs
+            if !isempty(d) && !startswith(d, "LV functions") && !startswith(d, "RT functions")
+                if !haskey(endogenous, vname)
+                    endogenous[vname] = (name="$(prefix)₊$(vname)",
+                                         description=d, sector=sector_name)
+                end
+            end
+        end
+
+        # Collect equations
+        for eq in eqs
+            lhs_str = string(eq.lhs)
+            rhs_str = string(eq.rhs)
+
+            is_diff = startswith(lhs_str, "Differential(t)")
+            if is_diff
+                inner = lhs_str[length("Differential(t)(")+1 : end-1]
+                lhs_var = replace(inner, "(t)" => "")
+            else
+                lhs_var = replace(lhs_str, "(t)" => "")
+            end
+
+            _is_delay_buffer(lhs_var) && continue
+
+            full_lhs = "$(prefix)₊$(lhs_var)"
+            rhs_clean = replace(rhs_str, "(t)" => "")
+            rhs_refs  = filter(!_is_delay_buffer, _extract_var_references(rhs_str))
+
+            push!(all_eqs, (lhs_full=full_lhs, lhs_short=lhs_var,
+                            rhs_str=rhs_clean, rhs_vars=rhs_refs, is_diff=is_diff))
+        end
+    end
+
+    return endogenous, all_eqs
+end
+
+"""
+    _resolve_described_var(name, described_vars, label)
+
+Resolve `name` (full or short) against a collection of described variables.
+Returns the matching entry or throws an informative error.
+"""
+function _resolve_described_var(name::String, described_vars, label::String)
+    # Exact match on full name
+    for v in described_vars
+        v.name == name && return v
+    end
+    # Short-name match
+    matches = [v for v in described_vars if v.short_name == name]
+    length(matches) == 1 && return matches[1]
+    if length(matches) > 1
+        names = join([m.name for m in matches], ", ")
+        error("Ambiguous $label name '$name'. Matches: $names. Use the full namespaced name.")
+    end
+    error("$label '$name' not found. Use list_auxiliaries() to see available auxiliaries.")
+end
+
+"""
     _build_model_structure()
 
 Analyze all sector systems and return the full SD model structure:
@@ -360,4 +459,109 @@ function flow_stocks(flow_name::String)
     end
 
     error("Flow '$flow_name' not found. Use list_flows() to see available flows.")
+end
+
+"""
+    auxiliary_inputs(name::String)
+
+Show all variables that are **direct inputs** to the given auxiliary variable —
+i.e. the variables that appear on the right-hand side of its defining equation.
+
+`name` may be the full namespaced name (e.g. `"wel₊AWBI"`) or the short name
+(e.g. `"AWBI"`) when unambiguous.
+
+Cross-sector dependencies are resolved: if an auxiliary in the Wellbeing sector
+references `GDPP`, the result reports the variable from its home sector
+(Population) rather than the local external copy.
+
+Returns a NamedTuple with fields:
+`name`, `description`, `sector`, `equation`,
+`inputs` (vector of `(name, description, sector)` tuples).
+
+# Example
+```julia
+info = Earth4All.auxiliary_inputs("AWBI")
+println("Equation: ", info.equation)
+for inp in info.inputs
+    println("  ", inp.name, " — ", inp.description, " (", inp.sector, ")")
+end
+```
+"""
+function auxiliary_inputs(name::String)
+    ms = _build_model_structure()
+    found = _resolve_described_var(name, ms.auxiliaries, "Auxiliary")
+
+    endogenous, all_eqs = _build_dependency_info()
+
+    # Find the algebraic equation that defines this auxiliary
+    eq_info = nothing
+    for eq in all_eqs
+        if eq.lhs_full == found.name && !eq.is_diff
+            eq_info = eq
+            break
+        end
+    end
+
+    if eq_info === nothing
+        error("No defining equation found for auxiliary '$(found.name)'.")
+    end
+
+    # Resolve each RHS variable reference to its home sector
+    InputInfo = NamedTuple{(:name, :description, :sector), Tuple{String,String,String}}
+    inputs = InputInfo[]
+    for ref in eq_info.rhs_vars
+        if haskey(endogenous, ref)
+            e = endogenous[ref]
+            push!(inputs, (name=e.name, description=e.description, sector=e.sector))
+        end
+    end
+
+    return (name=found.name, description=found.description, sector=found.sector,
+            equation=eq_info.rhs_str, inputs=sort(unique(inputs), by=x -> x.name))
+end
+
+"""
+    auxiliary_effects(name::String)
+
+Show all variables whose defining equations **directly reference** the given
+auxiliary — i.e. every variable for which this auxiliary is an input.
+
+`name` may be the full namespaced name (e.g. `"pop₊GDPP"`) or the short name
+(e.g. `"GDPP"`) when unambiguous.
+
+Effects are traced across sector boundaries: if `GDPP` (defined in Population)
+appears in Wellbeing's equations, those downstream variables are included.
+
+Returns a NamedTuple with fields:
+`name`, `description`, `sector`,
+`effects` (vector of `(name, description, sector)` tuples).
+
+# Example
+```julia
+info = Earth4All.auxiliary_effects("GDPP")
+for eff in info.effects
+    println("  ", eff.name, " — ", eff.description, " (", eff.sector, ")")
+end
+```
+"""
+function auxiliary_effects(name::String)
+    ms = _build_model_structure()
+    found = _resolve_described_var(name, ms.auxiliaries, "Auxiliary")
+
+    endogenous, all_eqs = _build_dependency_info()
+
+    # Find every equation whose RHS references this auxiliary's short name
+    EffectInfo = NamedTuple{(:name, :description, :sector), Tuple{String,String,String}}
+    effects = EffectInfo[]
+    for eq in all_eqs
+        if found.short_name in eq.rhs_vars
+            if haskey(endogenous, eq.lhs_short)
+                e = endogenous[eq.lhs_short]
+                push!(effects, (name=e.name, description=e.description, sector=e.sector))
+            end
+        end
+    end
+
+    return (name=found.name, description=found.description, sector=found.sector,
+            effects=sort(unique(effects), by=x -> x.name))
 end
