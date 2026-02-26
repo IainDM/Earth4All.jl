@@ -1,4 +1,6 @@
 using Test
+using XLSX
+using ZipArchives: ZipReader, zip_names, zip_readentry
 
 # Load the Earth4All module via include (project is not set up as a package)
 include(joinpath(@__DIR__, "..", "src", "Earth4All.jl"))
@@ -251,6 +253,66 @@ const SOL_TLTL = Earth4All.run_tltl_solution()
 
         # Values should be finite numbers
         @test all(p -> isfinite(p.value), params)
+    end
+
+    # ──────────────────────────────────────────────────
+    # Excel export
+    # ──────────────────────────────────────────────────
+    @testset "export_excel" begin
+        test_file = joinpath(tempdir(), "test_earth4all_export.xlsx")
+
+        try
+            # Export without opening
+            result_path = Earth4All.export_excel(SOL_TLTL; filename=test_file, open_file=false)
+            @test isfile(result_path)
+            @test result_path == abspath(test_file)
+
+            # Read back the Excel file and verify structure
+            xf = XLSX.readxlsx(result_path)
+            sheet = xf["Results"]
+
+            # Header row
+            @test sheet["A1"] == "Variable"
+            @test sheet["B1"] == "Code"
+
+            # Time values in header row (starting from C1)
+            times = SOL_TLTL.t
+            @test sheet["C1"] ≈ times[1]
+
+            # Variable data
+            vars = Earth4All.variable_list(SOL_TLTL)
+            nvars = length(vars)
+
+            # Check row count: header + one row per variable
+            # Read first column to count data rows
+            first_var_name = sheet["A2"]
+            @test first_var_name == vars[1][1]  # Should match first sorted variable
+
+            # Verify short code is extracted correctly
+            expected_short = contains(vars[1][1], "₊") ? split(vars[1][1], "₊"; limit=2)[2] : vars[1][1]
+            @test sheet["B2"] == expected_short
+
+            # Verify a known variable has correct values
+            pop_row = findfirst(v -> v[1] == "pop₊POP", vars)
+            if pop_row !== nothing
+                row_idx = pop_row + 1  # +1 for header row
+                @test sheet["A$(row_idx)"] == "pop₊POP"
+                @test sheet["B$(row_idx)"] == "POP"
+                # First data value should match get_timeseries
+                ts = Earth4All.get_timeseries(SOL_TLTL, "pop₊POP")
+                @test sheet["C$(row_idx)"] ≈ ts.values[1]
+            end
+
+            # Verify auto-filter was applied by checking the XML
+            data = read(result_path)
+            reader = ZipReader(data)
+            sheet_xml = String(zip_readentry(reader, "xl/worksheets/sheet1.xml"))
+            @test contains(sheet_xml, "autoFilter")
+            @test contains(sheet_xml, "ref=\"A1:")
+        finally
+            # Clean up
+            isfile(test_file) && rm(test_file)
+        end
     end
 
     # ──────────────────────────────────────────────────
