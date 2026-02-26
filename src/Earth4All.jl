@@ -24,5 +24,6 @@ include("earth4all/solutions.jl")
 include("earth4all/plots.jl")
 include("earth4all/variables.jl")
 include("earth4all/structure.jl")
+include("earth4all/excel.jl")
 
 end
