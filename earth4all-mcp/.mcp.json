@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "earth4all-modelling": {
+      "command": "npx",
+      "args": ["tsx", "src/servers/modelling-server.ts"],
+      "cwd": "."
+    },
+    "earth4all-explorer": {
+      "command": "npx",
+      "args": ["tsx", "src/servers/explorer-server.ts"],
+      "cwd": "."
+    }
+  }
+}
