@@ -127,7 +127,7 @@ export async function ensureWorker(): Promise<void> {
     }, startupTimeout);
 
     proc.stderr?.on("data", (data: Buffer) => {
-      logger.debug(`Julia stderr: ${data.toString().trim()}`);
+      logger.info(`Julia stderr: ${data.toString().trim()}`);
     });
 
     proc.stdout?.on("data", (data: Buffer) => {
