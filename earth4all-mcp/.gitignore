@@ -1,0 +1,6 @@
+node_modules/
+dist/
+data/projects/
+*.tsbuildinfo
+julia/earth4all_sysimage.*
+julia/_precompile_exec.jl
