@@ -13,6 +13,8 @@ Pkg.add([
     "JSON",
     "IfElse",
     "PlotlyJS",
+    "XLSX",
+    "ZipArchives",
     "PackageCompiler",
 ])
 
