@@ -211,61 +211,56 @@ async function sendCommand(
   command: Record<string, unknown>,
   onProgress?: () => void,
 ): Promise<string> {
-  await ensureWorker();
+  // Start the progress heartbeat BEFORE ensureWorker(), because a cold
+  // worker startup is exactly when the client most needs to know the
+  // server is still alive.
+  const heartbeat = onProgress
+    ? setInterval(() => {
+        try {
+          onProgress();
+        } catch {
+          // never let a notification failure abort the Julia call
+        }
+      }, PROGRESS_HEARTBEAT_MS)
+    : null;
+  const stopHeartbeat = () => {
+    if (heartbeat) clearInterval(heartbeat);
+  };
 
-  if (!state.process || !state.process.stdin) {
-    throw new Error("Julia worker is not running");
-  }
+  try {
+    await ensureWorker();
 
-  return new Promise((resolve, reject) => {
-    const heartbeat = onProgress
-      ? setInterval(() => {
-          try {
-            onProgress();
-          } catch {
-            // never let a notification failure abort the Julia call
-          }
-        }, PROGRESS_HEARTBEAT_MS)
-      : null;
+    if (!state.process || !state.process.stdin) {
+      throw new Error("Julia worker is not running");
+    }
 
-    const finish = () => {
-      if (heartbeat) clearInterval(heartbeat);
-    };
+    return await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        // Remove this entry from the queue
+        const idx = state.commandQueue.findIndex((c) => c.timeout === timeout);
+        if (idx !== -1) state.commandQueue.splice(idx, 1);
+        if (state.pendingResolve === null) {
+          // Wasn't dispatched yet, just reject
+        } else {
+          state.pendingResolve = null;
+          state.pendingReject = null;
+          dispatchNext();
+        }
+        reject(new Error(`Julia command timed out after ${SIMULATION_TIMEOUT_MS / 1000}s`));
+      }, SIMULATION_TIMEOUT_MS);
 
-    const timeout = setTimeout(() => {
-      finish();
-      // Remove this entry from the queue
-      const idx = state.commandQueue.findIndex((c) => c.timeout === timeout);
-      if (idx !== -1) state.commandQueue.splice(idx, 1);
-      if (state.pendingResolve === null) {
-        // Wasn't dispatched yet, just reject
-      } else {
-        state.pendingResolve = null;
-        state.pendingReject = null;
-        dispatchNext();
-      }
-      reject(new Error(`Julia command timed out after ${SIMULATION_TIMEOUT_MS / 1000}s`));
-    }, SIMULATION_TIMEOUT_MS);
+      state.commandQueue.push({ resolve, reject, timeout });
 
-    state.commandQueue.push({
-      resolve: (v) => {
-        finish();
-        resolve(v);
-      },
-      reject: (e) => {
-        finish();
-        reject(e);
-      },
-      timeout,
+      // Write the command immediately — Julia will process them in order
+      const json = JSON.stringify(command);
+      state.process!.stdin!.write(json + "\n");
+
+      // If no command is in-flight, dispatch this one
+      dispatchNext();
     });
-
-    // Write the command immediately — Julia will process them in order
-    const json = JSON.stringify(command);
-    state.process!.stdin!.write(json + "\n");
-
-    // If no command is in-flight, dispatch this one
-    dispatchNext();
-  });
+  } finally {
+    stopHeartbeat();
+  }
 }
 
 export async function runSimulation(
