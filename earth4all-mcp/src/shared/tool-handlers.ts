@@ -188,9 +188,12 @@ export async function handleSetTurnaround(args: {
   );
 }
 
-export async function handleRunSimulation(args: {
-  project_id: string;
-}): Promise<ToolResult> {
+export async function handleRunSimulation(
+  args: {
+    project_id: string;
+  },
+  onProgress?: () => void,
+): Promise<ToolResult> {
   const project = await getProject(args.project_id);
   if (!project) {
     return textResult(`Project not found: ${args.project_id}`, true);
@@ -200,7 +203,7 @@ export async function handleRunSimulation(args: {
   logger.info(`Running simulation for project ${args.project_id}`);
 
   try {
-    const result = await runSimulation(params);
+    const result = await runSimulation(params, undefined, undefined, onProgress);
     const projectDir = getProjectDir(args.project_id);
 
     // Save results
@@ -237,10 +240,13 @@ export async function handleGetResults(args: {
   );
 }
 
-export async function handleCompareScenarios(args: {
-  project_id_a: string;
-  project_id_b: string;
-}): Promise<ToolResult> {
+export async function handleCompareScenarios(
+  args: {
+    project_id_a: string;
+    project_id_b: string;
+  },
+  onProgress?: () => void,
+): Promise<ToolResult> {
   const projectA = await getProject(args.project_id_a);
   if (!projectA) {
     return textResult(`Project not found: ${args.project_id_a}`, true);
@@ -257,8 +263,8 @@ export async function handleCompareScenarios(args: {
 
   try {
     const [resultA, resultB] = await Promise.all([
-      runSimulation(paramsA),
-      runSimulation(paramsB),
+      runSimulation(paramsA, undefined, undefined, onProgress),
+      runSimulation(paramsB, undefined, undefined, onProgress),
     ]);
 
     // Save results for both projects
@@ -366,6 +372,7 @@ export async function handleGetVariableTimeseries(args: {
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
+  onProgress?: () => void,
 ): Promise<ToolResult> {
   switch (name) {
     case "list_scenarios":
@@ -383,11 +390,11 @@ export async function handleToolCall(
     case "set_turnaround":
       return handleSetTurnaround(args as Parameters<typeof handleSetTurnaround>[0]);
     case "run_simulation":
-      return handleRunSimulation(args as Parameters<typeof handleRunSimulation>[0]);
+      return handleRunSimulation(args as Parameters<typeof handleRunSimulation>[0], onProgress);
     case "get_results":
       return handleGetResults(args as Parameters<typeof handleGetResults>[0]);
     case "compare_scenarios":
-      return handleCompareScenarios(args as Parameters<typeof handleCompareScenarios>[0]);
+      return handleCompareScenarios(args as Parameters<typeof handleCompareScenarios>[0], onProgress);
     case "save_baseline":
       return handleSaveBaseline(args as Parameters<typeof handleSaveBaseline>[0]);
     case "restore_baseline":

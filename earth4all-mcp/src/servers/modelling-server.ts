@@ -5,6 +5,7 @@ import { schemas, TOOL_METADATA } from "../shared/tool-schemas.js";
 import { handleToolCall } from "../shared/tool-handlers.js";
 import { GUIDES } from "../shared/guides.js";
 import { logger } from "../shared/logger.js";
+import { makeProgressCallback } from "../shared/progress.js";
 
 const MODELLING_TOOLS = [
   "list_scenarios",
@@ -29,10 +30,16 @@ const server = new McpServer({
 for (const name of MODELLING_TOOLS) {
   const schema = schemas[name as keyof typeof schemas];
   const meta = TOOL_METADATA[name];
-  server.tool(name, meta?.description ?? name, schema, async (args: Record<string, unknown>) => {
-    logger.info(`Tool call: ${name}`);
-    return await handleToolCall(name, args);
-  });
+  server.tool(
+    name,
+    meta?.description ?? name,
+    schema,
+    async (args: Record<string, unknown>, extra: unknown) => {
+      logger.info(`Tool call: ${name}`);
+      const onProgress = makeProgressCallback(extra, name);
+      return await handleToolCall(name, args, onProgress);
+    },
+  );
 }
 
 for (const key of ["model-overview", "scenarios", "troubleshooting", "julia-api"]) {

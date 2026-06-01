@@ -9,6 +9,7 @@ import {
   JULIA_STARTUP_TIMEOUT_MS,
   JULIA_SYSIMAGE_STARTUP_TIMEOUT_MS,
   SIMULATION_TIMEOUT_MS,
+  PROGRESS_HEARTBEAT_MS,
 } from "../constants.js";
 import type { SectorId, SectorParameters, SimulationResult } from "../earth4all/types.js";
 
@@ -206,7 +207,10 @@ function dispatchNext(): void {
   };
 }
 
-async function sendCommand(command: Record<string, unknown>): Promise<string> {
+async function sendCommand(
+  command: Record<string, unknown>,
+  onProgress?: () => void,
+): Promise<string> {
   await ensureWorker();
 
   if (!state.process || !state.process.stdin) {
@@ -214,7 +218,22 @@ async function sendCommand(command: Record<string, unknown>): Promise<string> {
   }
 
   return new Promise((resolve, reject) => {
+    const heartbeat = onProgress
+      ? setInterval(() => {
+          try {
+            onProgress();
+          } catch {
+            // never let a notification failure abort the Julia call
+          }
+        }, PROGRESS_HEARTBEAT_MS)
+      : null;
+
+    const finish = () => {
+      if (heartbeat) clearInterval(heartbeat);
+    };
+
     const timeout = setTimeout(() => {
+      finish();
       // Remove this entry from the queue
       const idx = state.commandQueue.findIndex((c) => c.timeout === timeout);
       if (idx !== -1) state.commandQueue.splice(idx, 1);
@@ -228,7 +247,17 @@ async function sendCommand(command: Record<string, unknown>): Promise<string> {
       reject(new Error(`Julia command timed out after ${SIMULATION_TIMEOUT_MS / 1000}s`));
     }, SIMULATION_TIMEOUT_MS);
 
-    state.commandQueue.push({ resolve, reject, timeout });
+    state.commandQueue.push({
+      resolve: (v) => {
+        finish();
+        resolve(v);
+      },
+      reject: (e) => {
+        finish();
+        reject(e);
+      },
+      timeout,
+    });
 
     // Write the command immediately — Julia will process them in order
     const json = JSON.stringify(command);
@@ -243,6 +272,7 @@ export async function runSimulation(
   parameters: Record<string, SectorParameters>,
   initialisations?: Record<string, Record<string, number>>,
   variables?: string[],
+  onProgress?: () => void,
 ): Promise<SimulationResult> {
   const command: Record<string, unknown> = {
     command: "run",
@@ -255,7 +285,7 @@ export async function runSimulation(
     command.variables = variables;
   }
 
-  const response = await sendCommand(command);
+  const response = await sendCommand(command, onProgress);
   return JSON.parse(response) as SimulationResult;
 }
 

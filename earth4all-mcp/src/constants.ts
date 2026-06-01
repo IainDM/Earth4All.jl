@@ -32,6 +32,7 @@ export const JULIA_SYSIMAGE_PATH = path.join(JULIA_DIR, `earth4all_sysimage.${SY
 export const SIMULATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 export const JULIA_STARTUP_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes for first compile
 export const JULIA_SYSIMAGE_STARTUP_TIMEOUT_MS = 30 * 1000; // 30 seconds when using sysimage
+export const PROGRESS_HEARTBEAT_MS = 10 * 1000; // 10s between MCP progress notifications during long Julia calls
 
 export const MODEL_START_YEAR = 1980;
 export const MODEL_END_YEAR = 2100;
