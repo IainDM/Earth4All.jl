@@ -30,7 +30,7 @@ const SYSIMAGE_EXT = process.platform === "win32" ? "dll" : process.platform ===
 export const JULIA_SYSIMAGE_PATH = path.join(JULIA_DIR, `earth4all_sysimage.${SYSIMAGE_EXT}`);
 
 export const SIMULATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-export const JULIA_STARTUP_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes for first compile
+export const JULIA_STARTUP_TIMEOUT_MS = 20 * 60 * 1000; // 20 min — enough for a first-time DiffEq+MTK precompile from cold caches. Subsequent starts are ~30-60s; sysimage starts use the shorter timeout below.
 export const JULIA_SYSIMAGE_STARTUP_TIMEOUT_MS = 30 * 1000; // 30 seconds when using sysimage
 export const PROGRESS_HEARTBEAT_MS = 10 * 1000; // 10s between MCP progress notifications during long Julia calls
 
