@@ -121,14 +121,45 @@ export async function ensureWorker(): Promise<void> {
     state.process = proc;
     state.buffer = "";
 
+    // Capture the worker's stderr so that if it dies before sending {"status":"ready"},
+    // we can surface the actual Julia error in the rejection message — not just "exit code 1".
+    let stderrTail = "";
+    const STDERR_TAIL_LIMIT = 4096;
+
+    // Track whether the startup promise has been settled, so neither the exit
+    // handler nor the timeout double-settle it.
+    let startupSettled = false;
+    const settle = (
+      fn: typeof resolve | typeof reject,
+      arg?: Error,
+    ): void => {
+      if (startupSettled) return;
+      startupSettled = true;
+      clearTimeout(timeout);
+      if (arg === undefined) {
+        (fn as typeof resolve)();
+      } else {
+        (fn as typeof reject)(arg);
+      }
+    };
+
     const timeout = setTimeout(() => {
       state.starting = false;
-      proc.kill();
-      reject(new Error(`Julia worker startup timed out after ${startupTimeout / 1000}s`));
+      try {
+        proc.kill();
+      } catch {
+        /* already dead */
+      }
+      settle(
+        reject,
+        new Error(`Julia worker startup timed out after ${startupTimeout / 1000}s`),
+      );
     }, startupTimeout);
 
     proc.stderr?.on("data", (data: Buffer) => {
-      logger.info(`Julia stderr: ${data.toString().trim()}`);
+      const chunk = data.toString();
+      logger.info(`Julia stderr: ${chunk.trim()}`);
+      stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
     });
 
     proc.stdout?.on("data", (data: Buffer) => {
@@ -149,9 +180,8 @@ export async function ensureWorker(): Promise<void> {
             // Worker is ready
             state.ready = true;
             state.starting = false;
-            clearTimeout(timeout);
             logger.info("Julia worker is ready");
-            resolve();
+            settle(resolve);
           } else if (state.pendingResolve) {
             // This is a response to a pending command
             const res = state.pendingResolve;
@@ -168,9 +198,8 @@ export async function ensureWorker(): Promise<void> {
     proc.on("error", (err) => {
       state.starting = false;
       state.ready = false;
-      clearTimeout(timeout);
       rejectAllQueued(err);
-      reject(err);
+      settle(reject, err);
     });
 
     proc.on("exit", (code) => {
@@ -178,7 +207,16 @@ export async function ensureWorker(): Promise<void> {
       state.starting = false;
       state.process = null;
       logger.info(`Julia worker exited with code ${code}`);
-      rejectAllQueued(new Error(`Julia worker exited with code ${code}`));
+      const tail = stderrTail.trim();
+      const baseMsg = `Julia worker exited with code ${code} before becoming ready`;
+      const fullMsg = tail
+        ? `${baseMsg}. Last stderr from Julia:\n${tail}`
+        : `${baseMsg} (no stderr captured)`;
+      const err = new Error(fullMsg);
+      rejectAllQueued(err);
+      // If startup was still pending (i.e. worker died before {"status":"ready"}),
+      // reject the startup promise immediately rather than waiting for the timeout.
+      settle(reject, err);
     });
   });
 }
