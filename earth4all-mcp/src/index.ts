@@ -5,6 +5,7 @@ import { schemas, TOOL_METADATA } from "./shared/tool-schemas.js";
 import { handleToolCall } from "./shared/tool-handlers.js";
 import { GUIDES } from "./shared/guides.js";
 import { logger } from "./shared/logger.js";
+import { makeProgressCallback } from "./shared/progress.js";
 
 const server = new McpServer({
   name: SERVER_NAME,
@@ -13,10 +14,16 @@ const server = new McpServer({
 
 function registerTool(name: string, schema: Record<string, unknown>) {
   const meta = TOOL_METADATA[name];
-  server.tool(name, meta?.description ?? name, schema, async (args: Record<string, unknown>) => {
-    logger.info(`Tool call: ${name}`);
-    return await handleToolCall(name, args);
-  });
+  server.tool(
+    name,
+    meta?.description ?? name,
+    schema,
+    async (args: Record<string, unknown>, extra: unknown) => {
+      logger.info(`Tool call: ${name}`);
+      const onProgress = makeProgressCallback(extra, name);
+      return await handleToolCall(name, args, onProgress);
+    },
+  );
 }
 
 // Register all tools
